@@ -15,7 +15,7 @@ def test(session: nox.Session) -> None:
 def test(session: nox.Session) -> None:
     """Run the complete test suite"""
     session.install("--upgrade", "pip", "setuptools", "wheel")
-    session.notify("test_suite", posargs=session.posargs)
+    session.notify("test_suite")
     session.notify("test_style")
 
 
@@ -23,9 +23,34 @@ def test(session: nox.Session) -> None:
 def test_suite(session: nox.Session) -> None:
     """Run the Python-based test suite"""
     install_requirements_file(session, "test-env")
-    session.install(".")
-    session.chdir("")
-    session.run("no-tests-yet")
+    session.install("-e", ".")
+
+    session.chdir("tests")
+    session.run(
+        "rm",
+        "-rf",
+        str(Path("tests") / "build"),
+        external=True,
+    )
+    session.run(
+        "sphinx-apidoc",
+        "some_python_package",
+        "-f",
+        "-o",
+        str(Path("source") / "generated"),
+        env={"PYTHONPATH": "."},
+    )
+    session.run(
+        "sphinx-build",
+        "-a",  # re-write all output files
+        "-T",  # show full tracebacks
+        "-W",  # turn warnings into errors
+        "--keep-going",  # complete the build, but still report warnings as errors
+        "-b",
+        "html",
+        "source",
+        "build",
+    )
 
 
 @nox.session

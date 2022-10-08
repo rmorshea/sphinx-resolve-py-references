@@ -28,15 +28,18 @@ Notes:
     the ``__module__`` and ``__name__`` attributes of classes and functions because it
     won't work for any module attributes that have been documented (e.g. global variables).
 """
+from __future__ import annotations
 
 import builtins
 import distutils.sysconfig as sysconfig
+from enum import Enum
+import inspect
+import re
 import sys
-from fnmatch import fnmatch as glob_match
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Optional, Union
+from typing import Any
 
 from docutils.nodes import Element, TextElement
 from docutils.nodes import reference as Reference
@@ -46,59 +49,87 @@ from sphinx.environment import BuildEnvironment
 from sphinx.ext.intersphinx import missing_reference as intersphinx_get_missing_ref
 from sphinx.util import logging
 
-from .utils import trace_import_to_source
+from .utils import trace_import_to_source, try_resolve_import_value, Sentinel
 
 
 logger = logging.getLogger(__name__)
-UNDEFINED = object()
-SKIP = object()
+UNDEFINED = Sentinel("UNDEFINED")
+SKIP = Sentinel("SKIP")
+
+
+class Result(Enum):
+    skip = "skip"
+    undefined = "undefined"
 
 
 def resolve_py_reference(
     app: Sphinx, env: BuildEnvironment, node: Element, contnode: TextElement
-) -> Optional[Reference]:
+) -> Reference | None:
     if _skip_node(app, node):
         return None
-    elif "py:module" not in node or node["py:module"] is None:
-        if "refdoc" in node and node["refdoc"] != "api":
-            src = node.source or node["refdoc"]
-            msg = "No referent for name %r in %s"
-            logger.warning(msg % (node["reftarget"], src))
+
+    result = _resolve_imported_value(app, env, node, contnode)
+    assert result is not None, "defensive check"
+
+    if isinstance(result, Sentinel):
+        if result is UNDEFINED:
+            _log_no_referent_warning(node)
         return None
+
+    return result
+
+
+SOURCE_DESCRIPTION_PATTERN = re.compile(r"(?P<file>.*):docstring of (?P<import>.*)")
+
+
+def _log_no_referent_warning(node: Element) -> None:
+    if node.source:
+        if Path(node.source).is_file():
+            src = f"{node.source}:{node.line} via module {node['py:module']}"
+        else:
+            match = SOURCE_DESCRIPTION_PATTERN.match(node.source)
+            if match:
+                file = match.group("file")
+                import_name = match.group("import")
+                value = try_resolve_import_value(import_name, UNDEFINED)
+                if value is UNDEFINED:
+                    src = node.source
+                else:
+                    try:
+                        lineno = inspect.getsourcelines(value)[1]
+                    except OSError:
+                        src = node.source
+                    else:
+                        src = f"{file}:{lineno} (docstring of {import_name})"
+            else:
+                src = node.source
+    else:
+        src = node["py:module"]
 
     try:
-        index_in_source = node.rawsource.index(node["reftarget"])
+        index_in_source: int = node.rawsource.index(node["reftarget"])
     except ValueError:
-        return None
-
-    is_relative = node.rawsource[index_in_source - 1 : index_in_source] == "."
-    ref = _resolve_imported_value(app, env, node, contnode)
-
-    if ref is None and not _is_ref_to_external_package(node):
-        if node.source:
-            src = f"{node.source!r} via module {node['py:module']!r}"
-        else:
-            src = node["py:module"]
-        reftarget = node["reftarget"]
-        if is_relative:
-            reftarget = "." + reftarget
-        logger.warning(f"No referent for name '{reftarget}' in {src}")
-        return None
-    elif ref is SKIP:
-        return None
+        # raw source does not contain reftarget in case of type hint alias
+        is_relative = False
     else:
-        return ref
+        is_relative = node.rawsource[index_in_source - 1 : index_in_source] == "."
+
+    reftarget = ("." if is_relative else "") + node["reftarget"]
+    logger.warning(f"No referent for name {reftarget!r} at {src}")
 
 
 def _skip_node(app: Sphinx, node: Element) -> bool:
     return (
         node["refdomain"] != "py"
+        or "py:module" not in node
+        or node["py:module"] is None
         or any(
-            glob_match(node["reftarget"], pattern)
+            re.match(pattern, node["reftarget"])
             for pattern in app.config.allowed_missing_py_references
         )
         or node["reftarget"].split(".", 1)[0] in _STD_LIB_MODULES
         or hasattr(builtins, node["reftarget"])
+        or _is_ref_to_external_package(node)
     )
 
 
@@ -115,7 +146,13 @@ for path in Path(sysconfig.get_python_lib(standard_lib=True)).iterdir():
 
 def _resolve_imported_value(
     app: Sphinx, env: BuildEnvironment, node: Element, contnode: TextElement
-) -> Union[None, Reference, Any]:
+) -> Reference | Sentinel:
+    if try_resolve_import_value(node["reftarget"], UNDEFINED) is not UNDEFINED:
+        # If we can resolve just by trying to import it, then it's just undocumented.
+        # This happens frequently for TypeVar definitions in annotations. This at least
+        # validates that the reference truely exists.
+        return SKIP
+
     py_domain: PythonDomain = env.domains["py"]
 
     origin_module: Any = import_module(node["py:module"])
@@ -123,7 +160,7 @@ def _resolve_imported_value(
     origin_value = getattr(origin_module, origin_ref_head, UNDEFINED)
 
     if origin_value is UNDEFINED:
-        return None
+        return UNDEFINED
 
     if isinstance(origin_value, ModuleType):
         # check if we can get this from intersphinx
@@ -132,18 +169,16 @@ def _resolve_imported_value(
         if ref is not None:
             return ref
 
-    target_module, target_ref_head = trace_import_to_source(
-        origin_module, origin_ref_head
-    )
-
-    if target_module is None or target_ref_head is None:
-        return None
+    target_module_info = trace_import_to_source(origin_module, origin_ref_head)
+    if target_module_info is None:
+        return UNDEFINED
+    target_module, target_ref_head = target_module_info
 
     target_value = getattr(target_module, target_ref_head, UNDEFINED)
     if origin_value is not target_value:
-        return None
+        return UNDEFINED
 
-    class_name: Optional[str]
+    class_name: str | None
     if origin_ref_tail:
         if isinstance(target_value, type):
             class_name = target_value.__name__
@@ -175,6 +210,8 @@ def _resolve_imported_value(
         is_external_target = origin_package_name != target_package_name
         if is_external_target:
             return SKIP
+        else:
+            return UNDEFINED
 
     return ref
 

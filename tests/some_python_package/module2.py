@@ -1,7 +1,6 @@
+"""Module 2"""
+
 from .module3 import Class3, function_3, GLOBAL_3
-
-
-__all__ = ["Class3", "function_3", "GLOBAL_3"]
 
 
 GLOBAL_2 = "global 2"

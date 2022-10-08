@@ -17,6 +17,18 @@ def test(session: nox.Session) -> None:
     session.install("--upgrade", "pip", "setuptools", "wheel")
     session.notify("test_suite")
     session.notify("test_style")
+    session.notify("test_types")
+
+
+@nox.session
+def test_types(session: nox.Session) -> None:
+    install_requirements_file(session, "check-types")
+    session.run(
+        "mypy",
+        "--strict",
+        "--show-error-codes",
+        "src/sphinx_resolve_py_references",
+    )
 
 
 @nox.session

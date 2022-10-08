@@ -40,7 +40,7 @@ package = {
         "Programming Language :: Python :: 3.9",
     ],
     "options": {
-        "bdist_wheel": {"universal":True},
+        "bdist_wheel": {"universal": True},
     },
 }
 

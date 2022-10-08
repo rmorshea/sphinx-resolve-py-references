@@ -1,13 +1,15 @@
 """Module 1"""
 
-from .module2 import (
-    Class2,
-    Class3,
-    function_2,
-    function_3,
-    GLOBAL_2,
-    GLOBAL_3,
-)
+from .module2 import GLOBAL_2, GLOBAL_3, Class2, Class3, function_2, function_3
+
+
+# convince flake8 we use these
+Class2
+Class3
+function_2
+function_3
+GLOBAL_2
+GLOBAL_3
 
 
 class _UnDocType:

@@ -32,10 +32,10 @@ from __future__ import annotations
 
 import builtins
 import distutils.sysconfig as sysconfig
-from enum import Enum
 import inspect
 import re
 import sys
+from enum import Enum
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
@@ -49,7 +49,7 @@ from sphinx.environment import BuildEnvironment
 from sphinx.ext.intersphinx import missing_reference as intersphinx_get_missing_ref
 from sphinx.util import logging
 
-from .utils import trace_import_to_source, try_resolve_import_value, Sentinel
+from .utils import Sentinel, trace_import_to_source, try_resolve_import_value
 
 
 logger = logging.getLogger(__name__)
@@ -216,12 +216,12 @@ def _resolve_imported_value(
     return ref
 
 
-def _is_ref_to_external_package(node):
+def _is_ref_to_external_package(node: Element) -> bool:
     if "." not in node["reftarget"]:
         return False
 
-    origin_package = node["py:module"].split(".", 1)[0]
-    target_package = node["reftarget"].split(".", 1)[0]
+    origin_package: str = node["py:module"].split(".", 1)[0]
+    target_package: str = node["reftarget"].split(".", 1)[0]
 
     try:
         is_namespace_package = not hasattr(import_module(target_package), "__file__")

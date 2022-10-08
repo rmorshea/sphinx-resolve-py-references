@@ -4,7 +4,7 @@ import ast
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Optional, NamedTuple
+from typing import Any, NamedTuple
 
 
 class Sentinel:
@@ -15,8 +15,8 @@ class Sentinel:
         return self.name
 
 
-def try_resolve_import_value(import_path: str, default: Any) -> Any:
-    import_path = import_path.split(".")
+def try_resolve_import_value(import_name: str, default: Any) -> Any:
+    import_path = import_name.split(".")
 
     module = None
     for index in range(len(import_path)):
@@ -50,6 +50,9 @@ def trace_import_to_source(module: ModuleType, target: str) -> ModuleTarget | No
 
 
 def _find_next_import_target(module: ModuleType, target: str) -> ModuleTarget | None:
+    if module.__file__ is None:
+        return None
+
     is_package = Path(module.__file__).name == "__init__.py"
 
     with open(module.__file__) as f:
@@ -67,7 +70,7 @@ def _find_next_import_target(module: ModuleType, target: str) -> ModuleTarget | 
                         next_module_name = ".".join(
                             module.__name__.split(".")[relative_slice] + [node.module]
                         )
-                    return import_module(next_module_name), alias.name
+                    return ModuleTarget(import_module(next_module_name), alias.name)
     return None
 
 

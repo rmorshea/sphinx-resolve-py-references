@@ -120,7 +120,8 @@ def _log_no_referent_warning(node: Element) -> None:
 
 def _skip_node(app: Sphinx, node: Element) -> bool:
     return (
-        node["refdomain"] != "py"
+        "refdoc" not in node
+        or node["refdomain"] != "py"
         or "py:module" not in node
         or node["py:module"] is None
         or any(
@@ -208,10 +209,7 @@ def _resolve_imported_value(
         origin_package_name = origin_module.__name__.split(".", 1)[0]
         target_package_name = target_module.__name__.split(".", 1)[0]
         is_external_target = origin_package_name != target_package_name
-        if is_external_target:
-            return SKIP
-        else:
-            return UNDEFINED
+        return SKIP if is_external_target else UNDEFINED
 
     return ref
 

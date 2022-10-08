@@ -1,30 +1,58 @@
+from __future__ import annotations
+
 import ast
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
-from typing import Optional, Tuple
+from typing import Any, NamedTuple
 
 
-def trace_import_to_source(
-    module: ModuleType, target: str
-) -> Tuple[Optional[ModuleType], Optional[str]]:
-    last_module: Optional[ModuleType] = None
-    next_module: Optional[ModuleType] = module
-    last_target: Optional[str] = None
-    next_target: Optional[str] = target
+class Sentinel:
+    def __init__(self, name: str) -> None:
+        self.name = name
 
-    while True:
-        if next_module is None or next_target is None:
+    def __repr__(self) -> str:
+        return self.name
+
+
+def try_resolve_import_value(import_name: str, default: Any) -> Any:
+    import_path = import_name.split(".")
+
+    module = None
+    for index in range(len(import_path)):
+        try:
+            module = import_module(".".join(import_path[: index + 1]))
+        except ImportError:
             break
-        last_module, last_target = next_module, next_target
-        next_module, next_target = _find_next_import_target(last_module, next_target)
 
-    return last_module, last_target
+    if module is None:
+        return default
+
+    value = module
+    for attr in import_path[index:]:
+        try:
+            value = getattr(value, attr)
+        except AttributeError:
+            return default
+
+    return value
 
 
-def _find_next_import_target(
-    module: ModuleType, target: str
-) -> Tuple[Optional[ModuleType], Optional[str]]:
+def trace_import_to_source(module: ModuleType, target: str) -> ModuleTarget | None:
+    last_module_target: ModuleTarget | None = None
+    next_module_target: ModuleTarget | None = ModuleTarget(module, target)
+
+    while next_module_target:
+        last_module_target = next_module_target
+        next_module_target = _find_next_import_target(*last_module_target)
+
+    return last_module_target
+
+
+def _find_next_import_target(module: ModuleType, target: str) -> ModuleTarget | None:
+    if module.__file__ is None:
+        return None
+
     is_package = Path(module.__file__).name == "__init__.py"
 
     with open(module.__file__) as f:
@@ -42,5 +70,10 @@ def _find_next_import_target(
                         next_module_name = ".".join(
                             module.__name__.split(".")[relative_slice] + [node.module]
                         )
-                    return import_module(next_module_name), alias.name
-    return (None, None)
+                    return ModuleTarget(import_module(next_module_name), alias.name)
+    return None
+
+
+class ModuleTarget(NamedTuple):
+    module: ModuleType
+    target: str

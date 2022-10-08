@@ -1,3 +1,5 @@
+"""Module 3"""
+
 GLOBAL_3 = "global 3"
 """Docs for global 3"""
 
